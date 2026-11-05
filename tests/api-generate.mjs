@@ -111,4 +111,44 @@ assert.equal(stored9.nodes.length, 1);
 assert.equal(stored9.nodes[0].uuid, '919f6cbe-2bb5-44ea-ab18-b3863a0c122f');
 console.log('9 dedup-overwrite ok: shortId=', r9b.data.shortId);
 
+// 11. ss 传统格式：整个 method:password@host:port 做 base64
+const ssLegacy = 'ss://' + Buffer.from('aes-256-gcm:testpass123@edge.example.com:8388').toString('base64url') + '#demo-ss';
+const r11 = await post({ nodeLinks: ssLegacy, preferredIps: '104.17.149.87' });
+assert.equal(r11.status, 200, JSON.stringify(r11.data));
+assert.equal(r11.data.counts.outputNodes, 1);
+const sub11 = await worker.fetch(new Request(`https://sub.example.com/sub/${r11.data.shortId}?target=raw`), env);
+const line11 = Buffer.from(await sub11.text(), 'base64').toString('utf8').trim();
+const auth11 = line11.slice('ss://'.length).split('#')[0];
+assert.equal(Buffer.from(auth11, 'base64url').toString('utf8'), 'aes-256-gcm:testpass123@104.17.149.87:8388');
+assert.ok(line11.endsWith('#demo-ss%20%7C%201'), line11);
+console.log('11 ss-legacy ok:', line11);
+
+// 12. ss SIP002 格式，带 plugin：插件要保留，只换服务器
+const ssSip002 = 'ss://' + Buffer.from('aes-256-gcm:testpass123').toString('base64url') + '@edge.example.com:8388/?plugin=' + encodeURIComponent('v2ray-plugin;tls;host=example.com') + '#demo-ss-plugin';
+const r12 = await post({ nodeLinks: ssSip002, preferredIps: '104.17.149.87' });
+assert.equal(r12.status, 200, JSON.stringify(r12.data));
+const sub12 = await worker.fetch(new Request(`https://sub.example.com/sub/${r12.data.shortId}?target=raw`), env);
+const line12 = Buffer.from(await sub12.text(), 'base64').toString('utf8').trim();
+assert.ok(line12.startsWith('ss://'), line12);
+assert.ok(line12.includes('@104.17.149.87:8388/'), line12);
+assert.ok(line12.includes('plugin='), line12);
+assert.ok(decodeURIComponent(line12).includes('v2ray-plugin;tls;host=example.com'), line12);
+console.log('12 ss-sip002-plugin ok:', line12);
+
+// 13. 缺密码的 ss 链接应报 400
+const ssBad = 'ss://' + Buffer.from('aes-256-gcm:@edge.example.com:8388').toString('base64url') + '#bad-ss';
+const r13 = await post({ nodeLinks: ssBad, preferredIps: '104.17.149.87' });
+assert.equal(r13.status, 400);
+assert.ok(r13.data.error.includes('缺少'), JSON.stringify(r13.data));
+console.log('13 ss-no-password ok:', r13.data.error);
+
+// 14. Clash 导出包含 ss 节点
+const clash14 = await worker.fetch(new Request(`https://sub.example.com/sub/${r11.data.shortId}?target=clash`), env);
+assert.equal(clash14.status, 200);
+const clashText = await clash14.text();
+assert.ok(clashText.includes('type: ss'), clashText);
+assert.ok(clashText.includes('cipher: aes-256-gcm'), clashText);
+assert.ok(clashText.includes('password: "testpass123"'), clashText);
+console.log('14 ss-clash ok');
+
 console.log('api-generate test passed');

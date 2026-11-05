@@ -116,6 +116,102 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
   return deduped;
 }
 
+// base64url（无填充）：放在 URL authority 位置的 base64 不能含 +/=，否则会破坏链接结构
+function b64UrlNoPad(str) {
+  return b64EncodeUtf8(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// 宽松解码：兼容标准 base64 / base64url、缺填充
+function b64DecodeLoose(str) {
+  const normalized = String(str).replace(/-/g, '+').replace(/_/g, '/');
+  return b64DecodeUtf8(normalized + '='.repeat((4 - (normalized.length % 4)) % 4));
+}
+
+function splitHostPort(hostport) {
+  const m = String(hostport).match(/^(.*):(\d+)$/);
+  if (!m) return { server: hostport, port: 443 };
+  return { server: m[1], port: Number(m[2]) };
+}
+
+// ss 链接有两种写法：
+// 传统：ss://base64(method:password@host:port)#name
+// SIP002：ss://base64(method:password)@host:port/?plugin=xxx#name（userinfo 也可能是明文 method:password）
+function parseSs(link) {
+  let rest = link.slice('ss://'.length);
+  let name = 'ss';
+  const hashIdx = rest.indexOf('#');
+  if (hashIdx !== -1) {
+    try {
+      name = decodeURIComponent(rest.slice(hashIdx + 1)) || 'ss';
+    } catch {
+      name = rest.slice(hashIdx + 1) || 'ss';
+    }
+    rest = rest.slice(0, hashIdx);
+  }
+  let plugin = '';
+  const queryIdx = rest.indexOf('?');
+  if (queryIdx !== -1) {
+    try {
+      plugin = new URLSearchParams(rest.slice(queryIdx + 1)).get('plugin') || '';
+    } catch {}
+    rest = rest.slice(0, queryIdx);
+  }
+  // SIP002 写法是 ss://userinfo@host:port/?plugin=...，去掉查询参数后会剩一个 /
+  rest = rest.replace(/\/+$/, '');
+  let method = '';
+  let password = '';
+  let server = '';
+  let port = 443;
+  if (rest.includes('@')) {
+    const atIdx = rest.lastIndexOf('@');
+    let userinfo = rest.slice(0, atIdx);
+    const hostport = rest.slice(atIdx + 1);
+    if (!userinfo.includes(':')) {
+      try {
+        userinfo = b64DecodeLoose(userinfo);
+      } catch {
+        throw new Error(`节点「${name}」格式不正确：无法解析 ss 加密方法和密码`);
+      }
+    } else {
+      userinfo = decodeURIComponent(userinfo);
+    }
+    const colonIdx = userinfo.indexOf(':');
+    if (colonIdx === -1) {
+      throw new Error(`节点「${name}」格式不正确：无法解析 ss 加密方法和密码`);
+    }
+    method = userinfo.slice(0, colonIdx);
+    password = userinfo.slice(colonIdx + 1);
+    ({ server, port } = splitHostPort(hostport));
+  } else {
+    // 传统格式：整个 method:password@host:port 被 base64 编码
+    let decoded;
+    try {
+      decoded = b64DecodeLoose(rest);
+    } catch {
+      throw new Error(`节点「${name}」格式不正确：无法解析 ss 链接`);
+    }
+    const atIdx = decoded.lastIndexOf('@');
+    if (atIdx === -1) {
+      throw new Error(`节点「${name}」格式不正确：无法解析 ss 服务器地址`);
+    }
+    const userinfo = decoded.slice(0, atIdx);
+    const colonIdx = userinfo.indexOf(':');
+    if (colonIdx === -1) {
+      throw new Error(`节点「${name}」格式不正确：无法解析 ss 加密方法和密码`);
+    }
+    method = userinfo.slice(0, colonIdx);
+    password = userinfo.slice(colonIdx + 1);
+    ({ server, port } = splitHostPort(decoded.slice(atIdx + 1)));
+  }
+  if (!method || !password) {
+    throw new Error(`节点「${name}」缺少加密方法或密码：请粘贴完整的 ss 链接`);
+  }
+  if (!server) {
+    throw new Error(`节点「${name}」缺少服务器地址：请粘贴完整的 ss 链接`);
+  }
+  return { type: 'ss', name, server, port, method, password, plugin };
+}
+
 function parseVmess(link) {
   const raw = link.slice('vmess://'.length).trim();
   const obj = JSON.parse(b64DecodeUtf8(raw));
@@ -269,9 +365,13 @@ function parseRawLinks(input) {
       result.push(parseUrlLike(line, 'trojan'));
       continue;
     }
+    if (line.startsWith('ss://')) {
+      result.push(parseSs(line));
+      continue;
+    }
     try {
       const decoded = b64DecodeUtf8(line);
-      if (/^(vmess|vless|trojan):\/\//m.test(decoded)) {
+      if (/^(vmess|vless|trojan|ss):\/\//m.test(decoded)) {
         result.push(...parseRawLinks(decoded));
       }
     } catch {}
@@ -365,6 +465,16 @@ function encodeVlessShadowrocket(node) {
   return `vless://${authority}?${parts.join('&')}`;
 }
 
+function encodeSs(node) {
+  const name = encodeURIComponent(node.name || 'ss');
+  if (node.plugin) {
+    // 有插件只能用 SIP002 写法：插件放在查询参数里
+    const userinfo = b64UrlNoPad(`${node.method}:${node.password}`);
+    return `ss://${userinfo}@${node.server}:${node.port}/?plugin=${encodeURIComponent(node.plugin)}#${name}`;
+  }
+  return `ss://${b64UrlNoPad(`${node.method}:${node.password}@${node.server}:${node.port}`)}#${name}`;
+}
+
 function encodeTrojan(node) {
   const url = new URL(`trojan://${encodeURIComponent(node.password)}@${node.server}:${node.port}`);
   if (node.network) url.searchParams.set('type', node.network);
@@ -384,6 +494,7 @@ function renderRaw(nodes) {
       if (node.type === 'vmess') return encodeVmess(node);
       if (node.type === 'vless') return encodeVless(node);
       if (node.type === 'trojan') return encodeTrojan(node);
+      if (node.type === 'ss') return encodeSs(node);
       return '';
     })
     .filter(Boolean);
@@ -485,6 +596,35 @@ function renderClash(nodes) {
         return lines.join('\n');
       }
 
+      if (node.type === 'ss') {
+        const lines = [
+          `  - name: "${escapeYaml(node.name)}"`,
+          `    type: ss`,
+          `    server: ${node.server}`,
+          `    port: ${node.port}`,
+          `    cipher: ${node.method || 'aes-256-gcm'}`,
+          `    password: "${escapeYaml(node.password || '')}"`,
+          `    udp: true`,
+        ];
+        if (node.plugin) {
+          // 插件格式：obfs-local;obfs=http;obfs-host=example.com
+          const [pluginName, ...opts] = node.plugin.split(';');
+          lines.push(`    plugin: ${pluginName}`);
+          if (opts.length) {
+            lines.push(`    plugin-opts:`);
+            for (const opt of opts) {
+              const eq = opt.indexOf('=');
+              if (eq === -1) {
+                if (opt.trim()) lines.push(`      ${opt.trim()}: true`);
+                continue;
+              }
+              lines.push(`      ${opt.slice(0, eq)}: "${escapeYaml(opt.slice(eq + 1))}"`);
+            }
+          }
+        }
+        return lines.join('\n');
+      }
+
       return '';
     })
     .filter(Boolean);
@@ -532,10 +672,13 @@ function renderClash(nodes) {
 
 function renderSurge(nodes, baseUrl, accessToken) {
   const proxies = nodes
-    .filter((node) => node.type === 'vmess' || node.type === 'trojan')
+    .filter((node) => node.type === 'vmess' || node.type === 'trojan' || node.type === 'ss')
     .map((node) => {
       if (node.type === 'vmess') {
         return `${node.name} = vmess, ${node.server}, ${node.port}, username=${node.uuid}, ws=true, ws-path=${node.path || '/'}, ws-headers=Host:${node.host || ''}, tls=${node.tls ? 'true' : 'false'}, sni=${node.sni || ''}`;
+      }
+      if (node.type === 'ss') {
+        return `${node.name} = ss, ${node.server}, ${node.port}, encrypt-method=${node.method || 'aes-256-gcm'}, password=${node.password || ''}, udp-relay=true`;
       }
       return `${node.name} = trojan, ${node.server}, ${node.port}, password=${node.password || ''}, sni=${node.sni || ''}`;
     });
@@ -550,7 +693,7 @@ function renderSurge(nodes, baseUrl, accessToken) {
     '[Proxy Group]',
     'Proxy = select, ' +
       nodes
-        .filter((n) => n.type === 'vmess' || n.type === 'trojan')
+        .filter((n) => n.type === 'vmess' || n.type === 'trojan' || n.type === 'ss')
         .map((n) => n.name)
         .join(', '),
     '',

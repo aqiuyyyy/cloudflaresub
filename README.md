@@ -15,7 +15,7 @@
 
 ## 功能特性
 
-- 支持 `vmess`、`vless`、`trojan` 节点解析
+- 支持 `vmess`、`vless`、`trojan`、`ss` 节点解析（`ss` 支持传统 base64 和 SIP002 两种写法，带 `plugin` 参数的也会保留）
 - 支持 Base64 订阅文本自动展开
 - 支持 `host[:port][#remark]` 格式的优选地址
 - 结果写入 Workers KV，生成 `/sub/:id` 短链
@@ -174,7 +174,7 @@ curl "https://<worker>/sub/<id>?target=clash&token=<SUB_ACCESS_TOKEN>"
 
 - `src/worker.js` 当前是 KV 短链方案，不依赖 `SUB_LINK_SECRET`
 - 每条订阅记录默认保存 7 天（TTL）
-- Surge 导出当前仅包含 `vmess` / `trojan`
+- Surge 导出包含 `vmess` / `trojan` / `ss`（`ss` 的插件参数不带入 Surge 格式）
 
 ## License
 
