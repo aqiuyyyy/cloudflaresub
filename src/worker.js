@@ -66,8 +66,14 @@ function isValidIPv4(value = '') {
   return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
 }
 
-// 从优选 IP 接口拉取地址列表：接口返回每行一个 IP[:端口][#备注] 的文本，
-// 只保留合法 IPv4（过滤掉注释行、域名行等），去重后返回。
+function isValidHostname(value = '') {
+  return /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(
+    value
+  );
+}
+
+// 从优选 IP 接口拉取地址列表：接口返回每行一个 IP/域名[:端口][#备注] 的文本，
+// 只保留合法 IPv4 或域名（过滤掉注释行等），去重后返回。
 async function fetchPreferredEndpointsFromApi(apiUrl) {
   let parsed;
   try {
@@ -91,8 +97,8 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
     throw new Error(`优选 IP 接口返回 HTTP ${resp.status}`);
   }
 
-  const endpoints = parsePreferredEndpoints(await resp.text()).filter((ep) =>
-    isValidIPv4(ep.server)
+  const endpoints = parsePreferredEndpoints(await resp.text()).filter(
+    (ep) => isValidIPv4(ep.server) || isValidHostname(ep.server)
   );
 
   const seen = new Set();
@@ -105,7 +111,7 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
   }
 
   if (!deduped.length) {
-    throw new Error('优选 IP 接口里没有解析到可用 IPv4 地址');
+    throw new Error('优选 IP 接口里没有解析到可用地址');
   }
   return deduped;
 }

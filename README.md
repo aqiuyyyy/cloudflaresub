@@ -129,7 +129,7 @@ cloudflaresub/
 字段说明：
 - `nodeLinks`: 多行节点链接
 - `preferredIps`: 多行优选地址，格式 `host[:port][#remark]`
-- `preferredIpApi`: 优选 IP 接口地址（可选）。接口返回每行一个 `IP[:端口][#备注]` 的纯文本，生成时服务端自动拉取（10 秒超时），只保留合法 IPv4；可以和 `preferredIps` 一起用，两边合并后自动去重；只填接口也可以，不用再粘贴
+- `preferredIpApi`: 优选 IP 接口地址（可选）。接口返回每行一个 `IP/域名[:端口][#备注]` 的纯文本，生成时服务端自动拉取（10 秒超时），只保留合法 IPv4 或域名；可以和 `preferredIps` 一起用，两边合并后自动去重；只填接口也可以，不用再粘贴
 - `namePrefix`: 节点名附加前缀
 - `keepOriginalHost`: 是否保留原始 Host/SNI（默认 `true`）
 

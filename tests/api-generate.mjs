@@ -36,11 +36,12 @@ assert.equal(r2.status, 200, JSON.stringify(r2.data));
 assert.equal(r2.data.counts.preferredEndpoints, r2.data.counts.preferredApiEndpoints + 1);
 console.log('2 merge ok: total=', r2.data.counts.preferredEndpoints);
 
-// 3. 090227 接口（含域名行，需被过滤掉）
+// 3. 090227 接口（含域名行，域名也要保留）
 const r3 = await post({ nodeLinks: vmess, preferredIpApi: 'https://090227.pages.dev/bestcf?isp=all&ips=10' });
 assert.equal(r3.status, 200, JSON.stringify(r3.data));
 assert.ok(r3.data.counts.preferredApiEndpoints > 0);
-assert.ok(r3.data.preview.every((n) => /^\d+\.\d+\.\d+\.\d+$/.test(n.server)));
+assert.ok(r3.data.preview.every((n) => /^(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/.test(n.server)));
+assert.ok(r3.data.preview.some((n) => !/^\d+\.\d+\.\d+\.\d+$/.test(n.server)), '应包含域名优选地址');
 console.log('3 090227 ok: apiEndpoints=', r3.data.counts.preferredApiEndpoints);
 
 // 4. 坏地址应返回 400
