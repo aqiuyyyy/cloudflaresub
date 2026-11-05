@@ -60,6 +60,19 @@ function parsePreferredEndpoints(input) {
     });
 }
 
+// 把优选框里的内容分成两类：接口地址（http(s) 开头的行）和手动粘贴的 IP/域名
+function splitPreferredInput(input) {
+  const urls = [];
+  const manualLines = [];
+  for (const line of String(input || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^https?:\/\//i.test(trimmed)) urls.push(trimmed);
+    else manualLines.push(line);
+  }
+  return { urls, manualLines };
+}
+
 function isValidIPv4(value = '') {
   const parts = String(value).split('.');
   if (parts.length !== 4) return false;
@@ -796,18 +809,27 @@ async function handleGenerate(request, env, url) {
   }
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
 
-  // 优选地址来源二选一或两者合并：接口拉取 + 手动粘贴，去重后使用
-  const preferredIpApi = String(body.preferredIpApi || body.preferredApiUrl || '').trim();
+  // 优选地址：优选框里直接粘贴的 IP/域名，和混在里面的接口地址（http(s) 开头的行，服务端拉取），去重后使用
+  const { urls: apiUrls, manualLines } = splitPreferredInput(body.preferredIps || '');
+  // 兼容老版：以前单独传的 preferredIpApi 字段也算一个接口地址
+  const legacyApi = String(body.preferredIpApi || body.preferredApiUrl || '').trim();
+  if (legacyApi) apiUrls.unshift(legacyApi);
+
   let apiEndpoints = [];
-  if (preferredIpApi) {
-    try {
-      apiEndpoints = await fetchPreferredEndpointsFromApi(preferredIpApi);
-    } catch (e) {
-      return json({ ok: false, error: e.message }, 400);
+  const apiFailures = [];
+  if (apiUrls.length) {
+    const results = await Promise.allSettled(apiUrls.map((u) => fetchPreferredEndpointsFromApi(u)));
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status === 'fulfilled') apiEndpoints.push(...r.value);
+      else apiFailures.push(`${apiUrls[i]}：${r.reason?.message || r.reason}`);
+    }
+    if (!apiEndpoints.length && !manualLines.length) {
+      return json({ ok: false, error: apiFailures[0] || '优选 IP 接口里没有解析到可用地址' }, 400);
     }
   }
 
-  const manualEndpoints = parsePreferredEndpoints(body.preferredIps || '');
+  const manualEndpoints = parsePreferredEndpoints(manualLines.join('\n'));
   const seenEndpoints = new Set();
   const preferredEndpoints = [];
   for (const ep of [...apiEndpoints, ...manualEndpoints]) {
@@ -822,7 +844,6 @@ async function handleGenerate(request, env, url) {
   const options = {
     namePrefix: body.namePrefix || '',
     keepOriginalHost: body.keepOriginalHost !== false,
-    preferredIpApi,
   };
 
   const nodes = buildNodes(baseNodes, preferredEndpoints, options);
@@ -887,7 +908,10 @@ async function handleGenerate(request, env, url) {
       host: node.host || '',
       sni: node.sni || '',
     })),
-    warnings: accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。'],
+    warnings: [
+      ...(accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。']),
+      ...apiFailures.map((f) => `接口拉取失败，已跳过：${f}`),
+    ],
   });
 }
 

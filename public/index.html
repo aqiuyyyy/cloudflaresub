@@ -46,31 +46,18 @@
           </div>
 
           <div>
-            <label for="preferredIps">2. 粘贴优选 IP / 优选域名</label>
+            <label for="preferredIps">2. 粘贴优选 IP / 优选域名 / 接口地址</label>
             <textarea
               id="preferredIps"
               name="preferredIps"
               rows="8"
               placeholder="示例：
 104.16.1.2#HK-01
-104.17.2.3:2053#HK-02
-cf.example.com:443#US-Edge"
+https://bestcf.pages.dev/domain/all.txt?port=80
+https://aqiuyyyy.github.io/gate/nodes.txt"
             ></textarea>
             <p class="hint">
-              支持 <code>IP</code>、<code>IP:端口</code>、<code>域名</code>、<code>域名:端口</code>，<code>#</code> 后面可写备注。
-            </p>
-          </div>
-
-          <div>
-            <label for="preferredIpApi">或填优选 IP 接口地址（可选）</label>
-            <input
-              id="preferredIpApi"
-              name="preferredIpApi"
-              type="url"
-              placeholder="例如：https://bestcf.pages.dev/xinyitang3/ipv4.txt"
-            />
-            <p class="hint">
-              接口返回每行一个 <code>IP[:端口][#备注]</code> 的文本即可，生成时服务端自动拉取；和上面手动粘贴的可以一起用，会自动去重。只填接口也可以，不用再粘贴。
+              支持 <code>IP</code>、<code>IP:端口</code>、<code>域名</code>、<code>域名:端口</code>，<code>#</code> 后面可写备注；也可以直接粘贴接口地址（每行一个 <code>http(s)</code> 链接），生成时服务端自动拉取，和上面的一起用、自动去重。
             </p>
           </div>
 

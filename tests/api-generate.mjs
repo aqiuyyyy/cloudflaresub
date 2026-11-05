@@ -183,4 +183,32 @@ assert.ok(clashText18.includes('mode: "websocket"'), clashText18);
 assert.ok(clashText18.includes('cipher: aes-128-gcm'), clashText18);
 console.log('18 ss-v2ray-plugin-json ok:', line18);
 
+// 20. 接口地址直接混在优选框里：手动 IP + 接口 URL 一起用，合并去重
+const r20 = await post({ nodeLinks: vmess, preferredIps: '192.0.2.1\nhttps://bestcf.pages.dev/xinyitang3/ipv4.txt' });
+assert.equal(r20.status, 200, JSON.stringify(r20.data));
+assert.ok(r20.data.counts.preferredApiEndpoints > 0);
+assert.equal(r20.data.counts.preferredManualEndpoints, 1);
+assert.equal(r20.data.counts.preferredEndpoints, r20.data.counts.preferredApiEndpoints + 1);
+assert.equal(r20.data.counts.outputNodes, r20.data.counts.preferredEndpoints);
+console.log('20 mixed-input ok: total=', r20.data.counts.preferredEndpoints);
+
+// 21. 带查询参数的接口 URL 也能直接粘在优选框里
+const r21 = await post({ nodeLinks: vmess, preferredIps: '192.0.2.1\nhttps://090227.pages.dev/bestcf?isp=all&ips=10' });
+assert.equal(r21.status, 200, JSON.stringify(r21.data));
+assert.ok(r21.data.counts.preferredApiEndpoints > 0);
+assert.equal(r21.data.counts.preferredManualEndpoints, 1);
+console.log('21 url-with-query ok: apiEndpoints=', r21.data.counts.preferredApiEndpoints);
+
+// 22. 优选框里只有拉取失败的接口地址 → 400
+const r22 = await post({ nodeLinks: vmess, preferredIps: 'https://127.0.0.1:9/nope' });
+assert.equal(r22.status, 400);
+console.log('22 all-urls-fail ok:', r22.data.error);
+
+// 23. 一个接口失败 + 一个手动 IP：照常用手动的，失败的进 warnings
+const r23 = await post({ nodeLinks: vmess, preferredIps: '192.0.2.1\nhttps://127.0.0.1:9/nope' });
+assert.equal(r23.status, 200, JSON.stringify(r23.data));
+assert.equal(r23.data.counts.preferredEndpoints, 1);
+assert.ok(r23.data.warnings.some((w) => w.includes('127.0.0.1')), JSON.stringify(r23.data.warnings));
+console.log('23 partial-fail ok: warnings=', r23.data.warnings);
+
 console.log('api-generate test passed');

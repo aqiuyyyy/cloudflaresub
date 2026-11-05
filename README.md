@@ -119,8 +119,7 @@ cloudflaresub/
 ```json
 {
   "nodeLinks": "vmess://...\nvless://...",
-  "preferredIps": "104.16.1.2#HK\n104.17.2.3:2053#US",
-  "preferredIpApi": "https://bestcf.pages.dev/xinyitang3/ipv4.txt",
+  "preferredIps": "104.16.1.2#HK\nhttps://bestcf.pages.dev/domain/all.txt?port=80",
   "namePrefix": "CF",
   "keepOriginalHost": true
 }
@@ -128,8 +127,7 @@ cloudflaresub/
 
 字段说明：
 - `nodeLinks`: 多行节点链接
-- `preferredIps`: 多行优选地址，格式 `host[:port][#remark]`
-- `preferredIpApi`: 优选 IP 接口地址（可选）。接口返回每行一个 `IP/域名[:端口][#备注]` 的纯文本，生成时服务端自动拉取（10 秒超时），只保留合法 IPv4 或域名；可以和 `preferredIps` 一起用，两边合并后自动去重；只填接口也可以，不用再粘贴
+- `preferredIps`: 多行优选地址，格式 `host[:port][#remark]`；也可以直接混进接口地址（每行一个 `http(s)` 链接，例如 `https://bestcf.pages.dev/domain/all.txt?port=80`），生成时服务端自动拉取（10 秒超时），只保留合法 IPv4 或域名，和手动粘贴的合并后自动去重；只填接口也可以，不用再粘贴。老版单独传的 `preferredIpApi` 字段仍可用（等同于在 `preferredIps` 里加一行接口地址）
 - `namePrefix`: 节点名附加前缀
 - `keepOriginalHost`: 是否保留原始 Host/SNI（默认 `true`）
 
