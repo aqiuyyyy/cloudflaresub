@@ -188,4 +188,34 @@ const auth17 = line17.slice('ss://'.length).split('#')[0];
 assert.equal(Buffer.from(auth17, 'base64url').toString('utf8'), `2022-blake3-aes-256-gcm:${blakeKey}@104.17.149.87:8388`);
 console.log('17 ss-blake3-key ok:', line17);
 
+// 18. 用户的真实 ss 链接：插件用 ?v2ray-plugin=<base64 JSON> 传（不是 ?plugin=），
+// 生成后插件、加密、密码、端口都要和原来一样，只换服务器
+const ssReal = 'ss://YWVzLTEyOC1nY206NjQxNGI5NWQ4ZTU0YzRiZGE5ODM3ZmMzYjk3MjcwZmQ4NzFmQHNhYXMuc2luLmZhbjo4MA?v2ray-plugin=eyJwYXRoIjoiXC8iLCJtdXgiOmZhbHNlLCJob3N0IjoiYWVhZC41MjEuZG5zLWR5bmFtaWMubmV0IiwibW9kZSI6IndlYnNvY2tldCJ9#Snippet%E2%80%A2Ss-aead-dynamic';
+const r18 = await post({ nodeLinks: ssReal, preferredIps: '104.17.149.87' });
+assert.equal(r18.status, 200, JSON.stringify(r18.data));
+assert.equal(r18.data.counts.outputNodes, 1);
+const sub18 = await worker.fetch(new Request(`https://sub.example.com/sub/${r18.data.shortId}?target=raw`), env);
+const line18 = Buffer.from(await sub18.text(), 'base64').toString('utf8').trim();
+const auth18 = line18.slice('ss://'.length).split('@')[0];
+assert.equal(Buffer.from(auth18, 'base64url').toString('utf8'), 'aes-128-gcm:6414b95d8e54c4bda9837fc3b97270fd871f');
+assert.ok(line18.includes('@104.17.149.87:80/'), line18);
+assert.ok(line18.includes('v2ray-plugin=eyJwYXRoIjoiXC8iLCJtdXgiOmZhbHNlLCJob3N0IjoiYWVhZC41MjEuZG5zLWR5bmFtaWMubmV0IiwibW9kZSI6IndlYnNvY2tldCJ9'), line18);
+assert.ok(line18.includes('#Snippet'), line18);
+const clash18 = await worker.fetch(new Request(`https://sub.example.com/sub/${r18.data.shortId}?target=clash`), env);
+const clashText18 = await clash18.text();
+assert.ok(clashText18.includes('plugin: v2ray-plugin'), clashText18);
+assert.ok(clashText18.includes('host: "aead.521.dns-dynamic.net"'), clashText18);
+assert.ok(clashText18.includes('mode: "websocket"'), clashText18);
+assert.ok(clashText18.includes('cipher: aes-128-gcm'), clashText18);
+console.log('18 ss-v2ray-plugin-json ok:', line18);
+
+// 19. 有 v2ray-plugin 的节点不被 ssPlugin 默认值覆盖
+const r19 = await post({ nodeLinks: ssReal, preferredIps: '104.17.149.87', ssPlugin: 'obfs-local;obfs=http;obfs-host=other.example.com' });
+assert.equal(r19.status, 200, JSON.stringify(r19.data));
+const sub19 = await worker.fetch(new Request(`https://sub.example.com/sub/${r19.data.shortId}?target=raw`), env);
+const line19 = Buffer.from(await sub19.text(), 'base64').toString('utf8').trim();
+assert.ok(line19.includes('v2ray-plugin=eyJwYXRoIjoiXC8i'), line19);
+assert.ok(!line19.includes('obfs-local'), line19);
+console.log('19 ss-v2ray-plugin-wins ok');
+
 console.log('api-generate test passed');

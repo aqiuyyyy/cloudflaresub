@@ -149,10 +149,16 @@ function parseSs(link) {
     rest = rest.slice(0, hashIdx);
   }
   let plugin = '';
+  let v2rayPlugin = '';
   const queryIdx = rest.indexOf('?');
   if (queryIdx !== -1) {
     try {
-      plugin = new URLSearchParams(rest.slice(queryIdx + 1)).get('plugin') || '';
+      const params = new URLSearchParams(rest.slice(queryIdx + 1));
+      plugin = params.get('plugin') || '';
+      // 有的客户端用 v2ray-plugin=<base64 JSON> 传插件配置，
+      // 例如 ?v2ray-plugin=eyJwYXRoIjoiLyIsIm11eCI6ZmFsc2UsImhvc3QiOiJhZWFkLjUyMS5kbnMtZHluYW1pYy5uZXQiLCJtb2RlIjoid2Vic29ja2V0In0
+      // 解开是 {"path":"/","mux":false,"host":"aead.521.dns-dynamic.net","mode":"websocket"}
+      v2rayPlugin = params.get('v2ray-plugin') || '';
     } catch {}
     rest = rest.slice(0, queryIdx);
   }
@@ -209,7 +215,7 @@ function parseSs(link) {
   if (!server) {
     throw new Error(`节点「${name}」缺少服务器地址：请粘贴完整的 ss 链接`);
   }
-  return { type: 'ss', name, server, port, method, password, plugin };
+  return { type: 'ss', name, server, port, method, password, plugin, v2rayPlugin };
 }
 
 function parseVmess(link) {
@@ -467,10 +473,13 @@ function encodeVlessShadowrocket(node) {
 
 function encodeSs(node) {
   const name = encodeURIComponent(node.name || 'ss');
-  if (node.plugin) {
-    // 有插件只能用 SIP002 写法：插件放在查询参数里
+  // 有插件只能用 SIP002 写法：插件放在查询参数里，原样保留
+  if (node.plugin || node.v2rayPlugin) {
     const userinfo = b64UrlNoPad(`${node.method}:${node.password}`);
-    return `ss://${userinfo}@${node.server}:${node.port}/?plugin=${encodeURIComponent(node.plugin)}#${name}`;
+    const query = [];
+    if (node.v2rayPlugin) query.push(`v2ray-plugin=${encodeURIComponent(node.v2rayPlugin)}`);
+    if (node.plugin) query.push(`plugin=${encodeURIComponent(node.plugin)}`);
+    return `ss://${userinfo}@${node.server}:${node.port}/?${query.join('&')}#${name}`;
   }
   return `ss://${b64UrlNoPad(`${node.method}:${node.password}@${node.server}:${node.port}`)}#${name}`;
 }
@@ -606,7 +615,26 @@ function renderClash(nodes) {
           `    password: "${escapeYaml(node.password || '')}"`,
           `    udp: true`,
         ];
-        if (node.plugin) {
+        if (node.v2rayPlugin) {
+          // v2ray-plugin=<base64 JSON>，例如 {"path":"/","mux":false,"host":"...","mode":"websocket"}
+          lines.push(`    plugin: v2ray-plugin`);
+          try {
+            const opts = JSON.parse(b64DecodeLoose(node.v2rayPlugin));
+            const entries = Object.entries(opts).filter(
+              ([, v]) => typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number'
+            );
+            if (entries.length) {
+              lines.push(`    plugin-opts:`);
+              for (const [k, v] of entries) {
+                lines.push(
+                  typeof v === 'string'
+                    ? `      ${k}: "${escapeYaml(v)}"`
+                    : `      ${k}: ${v}`
+                );
+              }
+            }
+          } catch {}
+        } else if (node.plugin) {
           // 插件格式：obfs-local;obfs=http;obfs-host=example.com
           const [pluginName, ...opts] = node.plugin.split(';');
           lines.push(`    plugin: ${pluginName}`);
@@ -774,7 +802,7 @@ async function handleGenerate(request, env, url) {
   const ssPlugin = String(body.ssPlugin || '').trim();
   if (ssPlugin) {
     for (const node of baseNodes) {
-      if (node.type === 'ss' && !node.plugin) node.plugin = ssPlugin;
+      if (node.type === 'ss' && !node.plugin && !node.v2rayPlugin) node.plugin = ssPlugin;
     }
   }
 
