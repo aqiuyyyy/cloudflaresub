@@ -82,4 +82,18 @@ assert.ok(line8.includes('sni=none.880849.xyz'), line8);
 assert.ok(line8.includes('Workers-xhttp'), line8);
 console.log('8 shadowrocket-b64 ok:', line8);
 
+// 9. 相同输入再次生成，应覆盖旧订阅内容（不留存坏节点）
+// 先生成一次，再把存着的订阅改成坏内容，重新生成后应被新内容覆盖
+const r9a = await post({ nodeLinks: srLink, preferredIps: '104.17.149.87' });
+assert.equal(r9a.status, 200, JSON.stringify(r9a.data));
+store.set(`sub:${r9a.data.shortId}`, JSON.stringify({ version: 1, nodes: [] }));
+const r9b = await post({ nodeLinks: srLink, preferredIps: '104.17.149.87' });
+assert.equal(r9b.status, 200, JSON.stringify(r9b.data));
+assert.equal(r9b.data.shortId, r9a.data.shortId);
+assert.equal(r9b.data.deduplicated, true);
+const stored9 = JSON.parse(store.get(`sub:${r9a.data.shortId}`));
+assert.equal(stored9.nodes.length, 1);
+assert.equal(stored9.nodes[0].uuid, '919f6cbe-2bb5-44ea-ab18-b3863a0c122f');
+console.log('9 dedup-overwrite ok: shortId=', r9b.data.shortId);
+
 console.log('api-generate test passed');

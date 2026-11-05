@@ -610,7 +610,7 @@ async function handleGenerate(request, env, url) {
   const nodes = buildNodes(baseNodes, preferredEndpoints, options);
 
   const payload = {
-    version: 1,
+    version: 2,
     createdAt: new Date().toISOString(),
     options,
     nodes,
@@ -620,19 +620,19 @@ async function handleGenerate(request, env, url) {
   const dedupKey = `dedup:${dedupHash}`;
 
   let id = await env.SUB_STORE.get(dedupKey);
-
+  const deduplicated = !!id;
+  const ttl = 60 * 60 * 24 * 7; // 7天
   if (!id) {
     id = await createUniqueShortId(env);
-    const ttl = 60 * 60 * 24 * 7; // 7天
-
-    await env.SUB_STORE.put(`sub:${id}`, JSON.stringify(payload), {
-      expirationTtl: ttl,
-    });
-
     await env.SUB_STORE.put(dedupKey, id, {
       expirationTtl: ttl,
     });
   }
+  // 相同输入再次生成时，用新算出的内容覆盖旧订阅：解析规则修过之后，
+  // 旧订阅里可能还存着坏节点（比如缺 UUID 的），不覆盖就永远修不好
+  await env.SUB_STORE.put(`sub:${id}`, JSON.stringify(payload), {
+    expirationTtl: ttl,
+  });
 
   const origin = url.origin;
   const accessToken = env.SUB_ACCESS_TOKEN || '';
@@ -646,7 +646,7 @@ async function handleGenerate(request, env, url) {
   return json({
     ok: true,
     storage: 'kv',
-    deduplicated: true,
+    deduplicated,
     shortId: id,
     urls: {
       auto: withToken(''),
