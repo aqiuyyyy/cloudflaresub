@@ -42,7 +42,6 @@ form.addEventListener('submit', async (event) => {
     nodeLinks: document.getElementById('nodeLinks').value,
     preferredIps: document.getElementById('preferredIps').value,
     preferredIpApi: document.getElementById('preferredIpApi').value.trim(),
-    ssPlugin: document.getElementById('ssPlugin').value.trim(),
     namePrefix: document.getElementById('namePrefix').value,
     keepOriginalHost: document.getElementById('keepOriginalHost').checked,
   };

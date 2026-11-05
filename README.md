@@ -130,7 +130,6 @@ cloudflaresub/
 - `nodeLinks`: 多行节点链接
 - `preferredIps`: 多行优选地址，格式 `host[:port][#remark]`
 - `preferredIpApi`: 优选 IP 接口地址（可选）。接口返回每行一个 `IP/域名[:端口][#备注]` 的纯文本，生成时服务端自动拉取（10 秒超时），只保留合法 IPv4 或域名；可以和 `preferredIps` 一起用，两边合并后自动去重；只填接口也可以，不用再粘贴
-- `ssPlugin`: SS 默认插件（可选），例如 `v2ray-plugin;tls;host=none.880849.xyz;path=/`。生成的 ss 节点插件、加密方法、密码、UUID 都和原来一样：链接里自带插件的用自己的，没有插件的用这里填的
 - `namePrefix`: 节点名附加前缀
 - `keepOriginalHost`: 是否保留原始 Host/SNI（默认 `true`）
 

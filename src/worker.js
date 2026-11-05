@@ -776,7 +776,6 @@ async function buildDedupHash(body) {
     preferredIpApi: String(body.preferredIpApi || body.preferredApiUrl || '').trim(),
     namePrefix: String(body.namePrefix || '').trim(),
     keepOriginalHost: body.keepOriginalHost !== false,
-    ssPlugin: String(body.ssPlugin || '').trim(),
   };
   return sha256Hex(JSON.stringify(normalized));
 }
@@ -796,15 +795,6 @@ async function handleGenerate(request, env, url) {
     return json({ ok: false, error: e.message }, 400);
   }
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
-
-  // SS 默认插件：链接里自带插件的用自己的，没有的用这里填的，
-  // 保证生成的 ss 节点插件和原来一样
-  const ssPlugin = String(body.ssPlugin || '').trim();
-  if (ssPlugin) {
-    for (const node of baseNodes) {
-      if (node.type === 'ss' && !node.plugin && !node.v2rayPlugin) node.plugin = ssPlugin;
-    }
-  }
 
   // 优选地址来源二选一或两者合并：接口拉取 + 手动粘贴，去重后使用
   const preferredIpApi = String(body.preferredIpApi || body.preferredApiUrl || '').trim();
@@ -833,7 +823,6 @@ async function handleGenerate(request, env, url) {
     namePrefix: body.namePrefix || '',
     keepOriginalHost: body.keepOriginalHost !== false,
     preferredIpApi,
-    ssPlugin,
   };
 
   const nodes = buildNodes(baseNodes, preferredEndpoints, options);
