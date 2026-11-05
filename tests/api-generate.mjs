@@ -151,4 +151,41 @@ assert.ok(clashText.includes('cipher: aes-256-gcm'), clashText);
 assert.ok(clashText.includes('password: "testpass123"'), clashText);
 console.log('14 ss-clash ok');
 
+// 15. ss 默认插件：链接没带插件的 ss 节点用 ssPlugin 补上；
+// 不填 ssPlugin 时 shortId 不同，且输出不带插件
+const ssNoPlugin = 'ss://' + Buffer.from('aes-256-gcm:testpass123@edge.example.com:8388').toString('base64url') + '#demo-ss-np';
+const r15a = await post({ nodeLinks: ssNoPlugin, preferredIps: '104.17.149.87' });
+assert.equal(r15a.status, 200, JSON.stringify(r15a.data));
+const sub15a = await worker.fetch(new Request(`https://sub.example.com/sub/${r15a.data.shortId}?target=raw`), env);
+const line15a = Buffer.from(await sub15a.text(), 'base64').toString('utf8').trim();
+assert.ok(!line15a.includes('plugin='), line15a);
+const r15b = await post({ nodeLinks: ssNoPlugin, preferredIps: '104.17.149.87', ssPlugin: 'v2ray-plugin;tls;host=none.880849.xyz;path=/' });
+assert.equal(r15b.status, 200, JSON.stringify(r15b.data));
+assert.notEqual(r15b.data.shortId, r15a.data.shortId);
+const sub15b = await worker.fetch(new Request(`https://sub.example.com/sub/${r15b.data.shortId}?target=raw`), env);
+const line15b = Buffer.from(await sub15b.text(), 'base64').toString('utf8').trim();
+assert.ok(line15b.includes('plugin=v2ray-plugin%3Btls%3Bhost%3Dnone.880849.xyz%3Bpath%3D%2F'), line15b);
+assert.ok(line15b.includes('@104.17.149.87:8388/'), line15b);
+console.log('15 ss-default-plugin ok:', line15b);
+
+// 16. ss 链接自带插件时，自己的优先，不被 ssPlugin 覆盖
+const r16 = await post({ nodeLinks: ssSip002, preferredIps: '104.17.149.87', ssPlugin: 'obfs-local;obfs=http;obfs-host=other.example.com' });
+assert.equal(r16.status, 200, JSON.stringify(r16.data));
+const sub16 = await worker.fetch(new Request(`https://sub.example.com/sub/${r16.data.shortId}?target=raw`), env);
+const line16 = Buffer.from(await sub16.text(), 'base64').toString('utf8').trim();
+assert.ok(decodeURIComponent(line16).includes('v2ray-plugin;tls;host=example.com'), line16);
+assert.ok(!line16.includes('obfs-local'), line16);
+console.log('16 ss-own-plugin-wins ok:', line16);
+
+// 17. ss 2022-blake3 密钥（含 +/= 特殊字符）原样保留：加密方法和密码必须和原来一样
+const blakeKey = 'oL+wQ7vK9JmX2pL4sD8fG6hJ1kN3mP5qR7tV9yB0=';
+const ssBlake = 'ss://' + Buffer.from(`2022-blake3-aes-256-gcm:${blakeKey}@edge.example.com:8388`).toString('base64url') + '#demo-ss-blake';
+const r17 = await post({ nodeLinks: ssBlake, preferredIps: '104.17.149.87' });
+assert.equal(r17.status, 200, JSON.stringify(r17.data));
+const sub17 = await worker.fetch(new Request(`https://sub.example.com/sub/${r17.data.shortId}?target=raw`), env);
+const line17 = Buffer.from(await sub17.text(), 'base64').toString('utf8').trim();
+const auth17 = line17.slice('ss://'.length).split('#')[0];
+assert.equal(Buffer.from(auth17, 'base64url').toString('utf8'), `2022-blake3-aes-256-gcm:${blakeKey}@104.17.149.87:8388`);
+console.log('17 ss-blake3-key ok:', line17);
+
 console.log('api-generate test passed');
