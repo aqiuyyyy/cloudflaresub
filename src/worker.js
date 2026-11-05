@@ -119,6 +119,11 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
 function parseVmess(link) {
   const raw = link.slice('vmess://'.length).trim();
   const obj = JSON.parse(b64DecodeUtf8(raw));
+  if (!obj.id) {
+    throw new Error(
+      `节点「${obj.ps || 'vmess'}」缺少 UUID：请粘贴完整的 vmess 链接`
+    );
+  }
   return {
     type: 'vmess',
     name: obj.ps || 'vmess',
@@ -138,7 +143,7 @@ function parseVmess(link) {
 
 function parseUrlLike(link, type) {
   const u = new URL(link);
-  return {
+  const node = {
     type,
     name: decodeURIComponent(u.hash.replace(/^#/, '')) || type,
     server: u.hostname,
@@ -154,6 +159,17 @@ function parseUrlLike(link, type) {
     alpn: u.searchParams.get('alpn') || '',
     flow: u.searchParams.get('flow') || '',
   };
+  if (type === 'vless' && !node.uuid) {
+    throw new Error(
+      `节点「${node.name}」缺少 UUID：请粘贴完整的 vless 链接（形如 vless://UUID@域名:端口?...），不要只复制一部分`
+    );
+  }
+  if (type === 'trojan' && !node.password) {
+    throw new Error(
+      `节点「${node.name}」缺少密码：请粘贴完整的 trojan 链接（形如 trojan://密码@域名:端口?...）`
+    );
+  }
+  return node;
 }
 
 function parseRawLinks(input) {
@@ -498,7 +514,12 @@ async function handleGenerate(request, env, url) {
     return json({ ok: false, error: '请求体不是合法 JSON' }, 400);
   }
 
-  const baseNodes = parseRawLinks(body.nodeLinks || '');
+  let baseNodes;
+  try {
+    baseNodes = parseRawLinks(body.nodeLinks || '');
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 400);
+  }
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
 
   // 优选地址来源二选一或两者合并：接口拉取 + 手动粘贴，去重后使用

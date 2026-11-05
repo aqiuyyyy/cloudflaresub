@@ -61,4 +61,10 @@ const lines = Buffer.from(await subRes.text(), 'base64').toString('utf8').split(
 assert.equal(lines.length, r1.data.counts.outputNodes);
 console.log('6 sub raw ok: lines=', lines.length);
 
+// 7. 缺少 UUID 的 vless 链接应直接报 400，不再静默生成坏节点
+const r7 = await post({ nodeLinks: 'vless://162.159.198.1:443?type=tcp&path=%2F%3Fed%3D8192&alpn=h2#vless', preferredIps: '104.17.149.87' });
+assert.equal(r7.status, 400);
+assert.ok(r7.data.error.includes('缺少 UUID'), JSON.stringify(r7.data));
+console.log('7 no-uuid ok:', r7.data.error);
+
 console.log('api-generate test passed');
