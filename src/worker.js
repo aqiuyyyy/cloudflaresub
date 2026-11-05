@@ -141,23 +141,79 @@ function parseVmess(link) {
   };
 }
 
+// Shadowrocket 等客户端导出的 vless 链接会把整个 :UUID@域名:端口 做 base64，
+// 放在 vless:// 后面（不含 @），例如：
+// vless://OjkxOWY2Y2JlLTJiYjUtNDRlYS1hYjE4LWIzODYzYTBjMTIyZkB3d3cubnR1LmVkdS5zZzo0NDM?…
+// 解码后是 :919f6cbe-2bb5-44ea-ab18-b3863a0c122f@www.ntu.edu.sg:443
+function decodeB64Authority(authority) {
+  try {
+    const padded = authority + '='.repeat((4 - (authority.length % 4)) % 4);
+    const decoded = b64DecodeUtf8(padded);
+    const m = decoded.match(/^:?([^@]+)@([^:]+):(\d+)$/);
+    if (m) return { uuid: m[1], server: m[2], port: Number(m[3]) };
+  } catch {}
+  return null;
+}
+
 function parseUrlLike(link, type) {
-  const u = new URL(link);
+  // 先看是不是 base64 形式的 userinfo：是的话先还原成标准形式再解析，
+  // 否则 new URL() 会把整段 base64 当成 hostname（还会小写化，无法还原）
+  let effectiveLink = link;
+  if (type === 'vless') {
+    const authority = link.slice(`${type}://`.length).split(/[/?#]/)[0];
+    if (authority && !authority.includes('@')) {
+      const decoded = decodeB64Authority(authority);
+      if (decoded) {
+        const rest = link.slice(link.indexOf(authority) + authority.length);
+        effectiveLink = `${type}://${decoded.uuid}@${decoded.server}:${decoded.port}${rest}`;
+      }
+    }
+  }
+  const u = new URL(effectiveLink);
+  const params = u.searchParams;
+  // 有的客户端只把 UUID 单独做 base64 放在用户名位置
+  let username = decodeURIComponent(u.username || '');
+  if (type === 'vless' && username && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(username)) {
+    try {
+      const padded = username + '='.repeat((4 - (username.length % 4)) % 4);
+      const decoded = b64DecodeUtf8(padded);
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded)) {
+        username = decoded;
+      }
+    } catch {}
+  }
+  // Shadowrocket 风格参数：obfsParam 里的 Host 是 XHTTP 的 Host 头
+  let obfsHost = '';
+  try {
+    const obfsParam = params.get('obfsParam');
+    if (obfsParam) obfsHost = JSON.parse(obfsParam).Host || '';
+  } catch {}
   const node = {
     type,
-    name: decodeURIComponent(u.hash.replace(/^#/, '')) || type,
+    name:
+      decodeURIComponent(u.hash.replace(/^#/, '')) ||
+      params.get('remarks') ||
+      type,
     server: u.hostname,
     port: Number(u.port || 443),
-    password: type === 'trojan' ? decodeURIComponent(u.username) : undefined,
-    uuid: type === 'vless' ? decodeURIComponent(u.username) : undefined,
-    network: u.searchParams.get('type') || 'tcp',
-    tls: (u.searchParams.get('security') || '').toLowerCase() === 'tls',
-    host: u.searchParams.get('host') || u.searchParams.get('sni') || '',
-    path: u.searchParams.get('path') || '/',
-    sni: u.searchParams.get('sni') || u.searchParams.get('host') || '',
-    fp: u.searchParams.get('fp') || '',
-    alpn: u.searchParams.get('alpn') || '',
-    flow: u.searchParams.get('flow') || '',
+    password: type === 'trojan' ? username : undefined,
+    uuid: type === 'vless' ? username : undefined,
+    // 标准参数 type/security/sni/fp 之外，再认 Shadowrocket 的 obfs/tls/peer/fingerprint
+    network: params.get('type') || params.get('obfs') || 'tcp',
+    tls:
+      (params.get('security') || '').toLowerCase() === 'tls' ||
+      params.get('tls') === '1',
+    host: params.get('host') || params.get('sni') || obfsHost || '',
+    path: params.get('path') || '/',
+    sni:
+      params.get('sni') ||
+      params.get('peer') ||
+      params.get('host') ||
+      obfsHost ||
+      '',
+    fp: params.get('fp') || params.get('fingerprint') || '',
+    alpn: params.get('alpn') || '',
+    flow: params.get('flow') || '',
   };
   if (type === 'vless' && !node.uuid) {
     throw new Error(

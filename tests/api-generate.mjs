@@ -67,4 +67,19 @@ assert.equal(r7.status, 400);
 assert.ok(r7.data.error.includes('缺少 UUID'), JSON.stringify(r7.data));
 console.log('7 no-uuid ok:', r7.data.error);
 
+// 8. Shadowrocket 导出的 base64 userinfo 格式 vless 链接（XHTTP，参数是 remarks/obfs/peer 风格）
+// 链接里的 :UUID@www.ntu.edu.sg:443 整体被 base64 编码放在 vless:// 后面，不能丢 UUID
+const srLink = 'vless://OjkxOWY2Y2JlLTJiYjUtNDRlYS1hYjE4LWIzODYzYTBjMTIyZkB3d3cubnR1LmVkdS5zZzo0NDM?path=/%3Fed%3D8192&remarks=Workers-xhttp&obfsParam=%7B%22%22:%7B%22xPaddingKey%22:%22key%22,%22xPaddingObfsMode%22:true,%22xPaddingHeader%22:%22referer%22,%22xPaddingMethod%22:%22tokenish%22%7D,%22Host%22:%22none.880849.xyz%22%7D&obfs=xhttp&tls=1&peer=none.880849.xyz&alpn=h2&udp=1&mode=stream-one&fingerprint=Chrome';
+const r8 = await post({ nodeLinks: srLink, preferredIps: '104.17.149.87' });
+assert.equal(r8.status, 200, JSON.stringify(r8.data));
+assert.equal(r8.data.counts.outputNodes, 1);
+const sub8 = await worker.fetch(new Request(`https://sub.example.com/sub/${r8.data.shortId}?target=raw`), env);
+const line8 = Buffer.from(await sub8.text(), 'base64').toString('utf8').trim();
+assert.ok(line8.startsWith('vless://919f6cbe-2bb5-44ea-ab18-b3863a0c122f@104.17.149.87:443?'), line8);
+assert.ok(line8.includes('type=xhttp'), line8);
+assert.ok(line8.includes('security=tls'), line8);
+assert.ok(line8.includes('sni=none.880849.xyz'), line8);
+assert.ok(line8.includes('Workers-xhttp'), line8);
+console.log('8 shadowrocket-b64 ok:', line8);
+
 console.log('api-generate test passed');
