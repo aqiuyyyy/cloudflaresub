@@ -159,11 +159,13 @@ function parseUrlLike(link, type) {
   // 先看是不是 base64 形式的 userinfo：是的话先还原成标准形式再解析，
   // 否则 new URL() 会把整段 base64 当成 hostname（还会小写化，无法还原）
   let effectiveLink = link;
+  let b64Userinfo = false;
   if (type === 'vless') {
     const authority = link.slice(`${type}://`.length).split(/[/?#]/)[0];
     if (authority && !authority.includes('@')) {
       const decoded = decodeB64Authority(authority);
       if (decoded) {
+        b64Userinfo = true;
         const rest = link.slice(link.indexOf(authority) + authority.length);
         effectiveLink = `${type}://${decoded.uuid}@${decoded.server}:${decoded.port}${rest}`;
       }
@@ -179,6 +181,7 @@ function parseUrlLike(link, type) {
       const decoded = b64DecodeUtf8(padded);
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded)) {
         username = decoded;
+        b64Userinfo = true;
       }
     } catch {}
   }
@@ -214,6 +217,24 @@ function parseUrlLike(link, type) {
     fp: params.get('fp') || params.get('fingerprint') || '',
     alpn: params.get('alpn') || '',
     flow: params.get('flow') || '',
+    // 原链接是 Shadowrocket 格式（base64 userinfo，或 obfs/remarks/peer 等参数）时，
+    // 输出也保持 Shadowrocket 格式：标准 vless 链接放不下 mode/obfsParam 这些参数，
+    // 转标准格式会丢配置，节点行为就和原来不一样了
+    inputFormat:
+      b64Userinfo ||
+      params.has('obfs') ||
+      params.has('remarks') ||
+      params.has('peer') ||
+      params.has('fingerprint') ||
+      params.has('obfsParam') ||
+      params.has('mode')
+        ? 'shadowrocket'
+        : 'standard',
+    srExtra: {
+      mode: params.get('mode') || '',
+      udp: params.get('udp') || '',
+      obfsParam: params.get('obfsParam') || '',
+    },
   };
   if (type === 'vless' && !node.uuid) {
     throw new Error(
@@ -305,6 +326,7 @@ function encodeVmess(node) {
 }
 
 function encodeVless(node) {
+  if (node.inputFormat === 'shadowrocket') return encodeVlessShadowrocket(node);
   const url = new URL(`vless://${encodeURIComponent(node.uuid)}@${node.server}:${node.port}`);
   url.searchParams.set('type', node.network || 'ws');
   if (node.tls) url.searchParams.set('security', 'tls');
@@ -316,6 +338,31 @@ function encodeVless(node) {
   if (node.flow) url.searchParams.set('flow', node.flow);
   url.hash = node.name;
   return url.toString();
+}
+
+// Shadowrocket 格式：整个 :UUID@域名:端口 做 base64url（无填充）放在 vless:// 后面，
+// 参数用 remarks/obfs/obfsParam/tls/peer/mode/fingerprint 这一套。
+// 注意不能用 new URL() 拼 authority，WHATWG URL 会把 host 小写化，base64 会被破坏。
+function encodeVlessShadowrocket(node) {
+  const authority = b64EncodeUtf8(`:${node.uuid}@${node.server}:${node.port}`)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  const parts = [];
+  const set = (k, v) => {
+    if (v !== undefined && v !== null && v !== '') parts.push(`${k}=${encodeURIComponent(v)}`);
+  };
+  set('path', node.path);
+  set('remarks', node.name);
+  set('obfsParam', node.srExtra?.obfsParam);
+  set('obfs', node.network || 'xhttp');
+  if (node.tls) set('tls', '1');
+  set('peer', node.sni);
+  set('alpn', node.alpn);
+  set('udp', node.srExtra?.udp);
+  set('mode', node.srExtra?.mode);
+  set('fingerprint', node.fp);
+  return `vless://${authority}?${parts.join('&')}`;
 }
 
 function encodeTrojan(node) {
