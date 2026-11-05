@@ -60,6 +60,56 @@ function parsePreferredEndpoints(input) {
     });
 }
 
+function isValidIPv4(value = '') {
+  const parts = String(value).split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
+// 从优选 IP 接口拉取地址列表：接口返回每行一个 IP[:端口][#备注] 的文本，
+// 只保留合法 IPv4（过滤掉注释行、域名行等），去重后返回。
+async function fetchPreferredEndpointsFromApi(apiUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(apiUrl).trim());
+  } catch {
+    throw new Error('优选 IP 接口地址不是合法 URL');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('优选 IP 接口地址只支持 http(s)');
+  }
+
+  let resp;
+  try {
+    resp = await fetch(parsed.toString(), { signal: AbortSignal.timeout(10000) });
+  } catch (e) {
+    throw new Error(
+      `优选 IP 接口拉取失败: ${e.name === 'TimeoutError' ? '超时 10 秒' : e.message}`
+    );
+  }
+  if (!resp.ok) {
+    throw new Error(`优选 IP 接口返回 HTTP ${resp.status}`);
+  }
+
+  const endpoints = parsePreferredEndpoints(await resp.text()).filter((ep) =>
+    isValidIPv4(ep.server)
+  );
+
+  const seen = new Set();
+  const deduped = [];
+  for (const ep of endpoints) {
+    const key = `${ep.server}:${ep.port || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(ep);
+  }
+
+  if (!deduped.length) {
+    throw new Error('优选 IP 接口里没有解析到可用 IPv4 地址');
+  }
+  return deduped;
+}
+
 function parseVmess(link) {
   const raw = link.slice('vmess://'.length).trim();
   const obj = JSON.parse(b64DecodeUtf8(raw));
@@ -427,6 +477,7 @@ async function buildDedupHash(body) {
   const normalized = {
     nodeLinks: normalizeLines(body.nodeLinks || ''),
     preferredIps: normalizeLines(body.preferredIps || ''),
+    preferredIpApi: String(body.preferredIpApi || body.preferredApiUrl || '').trim(),
     namePrefix: String(body.namePrefix || '').trim(),
     keepOriginalHost: body.keepOriginalHost !== false,
   };
@@ -442,14 +493,35 @@ async function handleGenerate(request, env, url) {
   }
 
   const baseNodes = parseRawLinks(body.nodeLinks || '');
-  const preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
-
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
+
+  // 优选地址来源二选一或两者合并：接口拉取 + 手动粘贴，去重后使用
+  const preferredIpApi = String(body.preferredIpApi || body.preferredApiUrl || '').trim();
+  let apiEndpoints = [];
+  if (preferredIpApi) {
+    try {
+      apiEndpoints = await fetchPreferredEndpointsFromApi(preferredIpApi);
+    } catch (e) {
+      return json({ ok: false, error: e.message }, 400);
+    }
+  }
+
+  const manualEndpoints = parsePreferredEndpoints(body.preferredIps || '');
+  const seenEndpoints = new Set();
+  const preferredEndpoints = [];
+  for (const ep of [...apiEndpoints, ...manualEndpoints]) {
+    const key = `${ep.server}:${ep.port || ''}`;
+    if (seenEndpoints.has(key)) continue;
+    seenEndpoints.add(key);
+    preferredEndpoints.push(ep);
+  }
+
   if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
 
   const options = {
     namePrefix: body.namePrefix || '',
     keepOriginalHost: body.keepOriginalHost !== false,
+    preferredIpApi,
   };
 
   const nodes = buildNodes(baseNodes, preferredEndpoints, options);
@@ -502,6 +574,8 @@ async function handleGenerate(request, env, url) {
     counts: {
       inputNodes: baseNodes.length,
       preferredEndpoints: preferredEndpoints.length,
+      preferredApiEndpoints: apiEndpoints.length,
+      preferredManualEndpoints: manualEndpoints.length,
       outputNodes: nodes.length,
     },
     preview: nodes.slice(0, 20).map((node) => ({

@@ -41,9 +41,16 @@ form.addEventListener('submit', async (event) => {
   const payload = {
     nodeLinks: document.getElementById('nodeLinks').value,
     preferredIps: document.getElementById('preferredIps').value,
+    preferredIpApi: document.getElementById('preferredIpApi').value.trim(),
     namePrefix: document.getElementById('namePrefix').value,
     keepOriginalHost: document.getElementById('keepOriginalHost').checked,
   };
+
+  if (!payload.preferredIps.trim() && !payload.preferredIpApi) {
+    warningBox.textContent = '请粘贴优选 IP，或填写优选 IP 接口地址。';
+    warningBox.classList.remove('hidden');
+    return;
+  }
 
   submitBtn.disabled = true;
   submitBtn.textContent = '生成中...';

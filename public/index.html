@@ -55,10 +55,22 @@
 104.16.1.2#HK-01
 104.17.2.3:2053#HK-02
 cf.example.com:443#US-Edge"
-              required
             ></textarea>
             <p class="hint">
               支持 <code>IP</code>、<code>IP:端口</code>、<code>域名</code>、<code>域名:端口</code>，<code>#</code> 后面可写备注。
+            </p>
+          </div>
+
+          <div>
+            <label for="preferredIpApi">或填优选 IP 接口地址（可选）</label>
+            <input
+              id="preferredIpApi"
+              name="preferredIpApi"
+              type="url"
+              placeholder="例如：https://bestcf.pages.dev/xinyitang3/ipv4.txt"
+            />
+            <p class="hint">
+              接口返回每行一个 <code>IP[:端口][#备注]</code> 的文本即可，生成时服务端自动拉取；和上面手动粘贴的可以一起用，会自动去重。只填接口也可以，不用再粘贴。
             </p>
           </div>
 
@@ -83,6 +95,7 @@ cf.example.com:443#US-Edge"
           <h2>说明</h2>
           <ul>
             <li>不会帮你找优选 IP，只负责把你现成的优选 IP 替换进节点。</li>
+            <li>优选 IP 除了手动粘贴，也可以填一个接口地址，生成时服务端自动拉取最新列表。</li>
             <li>生成的链接是“同一份节点内容”的不同导出格式，分别给不同客户端使用。</li>
             <li>推荐勾选“保留原 Host / SNI”，这样更适合 Cloudflare CDN 场景。</li>
             <li>订阅链接里的节点信息会通过服务端密钥加密，请不要把链接公开分享。</li>
