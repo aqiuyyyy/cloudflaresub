@@ -29,9 +29,10 @@ assert.equal(r1.data.counts.outputNodes, r1.data.counts.preferredApiEndpoints);
 assert.match(r1.data.preview[0].server, /^\d+\.\d+\.\d+\.\d+$/);
 console.log('1 api-only ok: apiEndpoints=', r1.data.counts.preferredApiEndpoints);
 
-// 2. 接口 + 手动合并去重
+// 2. 接口 + 手动合并去重（用接口返回的第一个地址原样拼一行，应去重）
 const firstIp = r1.data.preview[0].server;
-const r2 = await post({ nodeLinks: vmess, preferredIpApi: 'https://bestcf.pages.dev/xinyitang3/ipv4.txt', preferredIps: `${firstIp}:443#dup\n1.2.3.4:443#manual` });
+const firstPort = r1.data.preview[0].port;
+const r2 = await post({ nodeLinks: vmess, preferredIpApi: 'https://bestcf.pages.dev/xinyitang3/ipv4.txt', preferredIps: `${firstIp}:${firstPort}#dup\n1.2.3.4:443#manual` });
 assert.equal(r2.status, 200, JSON.stringify(r2.data));
 assert.equal(r2.data.counts.preferredEndpoints, r2.data.counts.preferredApiEndpoints + 1);
 console.log('2 merge ok: total=', r2.data.counts.preferredEndpoints);
@@ -210,5 +211,26 @@ assert.equal(r23.status, 200, JSON.stringify(r23.data));
 assert.equal(r23.data.counts.preferredEndpoints, 1);
 assert.ok(r23.data.warnings.some((w) => w.includes('127.0.0.1')), JSON.stringify(r23.data.warnings));
 console.log('23 partial-fail ok: warnings=', r23.data.warnings);
+
+// 24. sub:// 订阅器链接：无路径时补 /sub 嗅探参数，拉取订阅里的节点地址
+// （订阅内容每次拉取可能轮换，只断言端点数，不断言具体某个地址）
+const r24 = await post({ nodeLinks: vmess, preferredIps: '192.0.2.1\nsub://sub.cmliussss.net' });
+assert.equal(r24.status, 200, JSON.stringify(r24.data));
+assert.ok(r24.data.counts.preferredApiEndpoints >= 1);
+assert.equal(r24.data.counts.preferredManualEndpoints, 1);
+assert.equal(r24.data.counts.outputNodes, r24.data.counts.preferredEndpoints);
+console.log('24 sub-no-path ok: apiEndpoints=', r24.data.counts.preferredApiEndpoints);
+
+// 25. sub:// 带路径和参数时原样拉取
+const r25 = await post({ nodeLinks: vmess, preferredIps: 'sub://sub.cmliussss.net/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000' });
+assert.equal(r25.status, 200, JSON.stringify(r25.data));
+assert.ok(r25.data.counts.preferredApiEndpoints >= 1);
+console.log('25 sub-with-path ok: apiEndpoints=', r25.data.counts.preferredApiEndpoints);
+
+// 26. sub:// 拉到的不是订阅（没有节点地址）→ 400，报错提到订阅
+const r26 = await post({ nodeLinks: vmess, preferredIps: 'sub://example.com/' });
+assert.equal(r26.status, 400);
+assert.match(r26.data.error, /订阅/);
+console.log('26 sub-no-nodes ok:', r26.data.error);
 
 console.log('api-generate test passed');

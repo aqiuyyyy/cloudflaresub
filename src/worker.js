@@ -60,14 +60,14 @@ function parsePreferredEndpoints(input) {
     });
 }
 
-// 把优选框里的内容分成两类：接口地址（http(s) 开头的行）和手动粘贴的 IP/域名
+// 把优选框里的内容分成两类：接口地址（http(s) 或 sub:// 开头的行）和手动粘贴的 IP/域名
 function splitPreferredInput(input) {
   const urls = [];
   const manualLines = [];
   for (const line of String(input || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    if (/^https?:\/\//i.test(trimmed)) urls.push(trimmed);
+    if (/^https?:\/\//i.test(trimmed) || /^sub:\/\//i.test(trimmed)) urls.push(trimmed);
     else manualLines.push(line);
   }
   return { urls, manualLines };
@@ -85,22 +85,98 @@ function isValidHostname(value = '') {
   );
 }
 
+// 订阅器链接的嗅探参数：无路径的 sub:// 链接补 /sub 后用这组假参数拉取一份样本订阅
+const SUB_SNIFF_QUERY = 'host=example.com&uuid=00000000-0000-4000-8000-000000000000';
+
+// sub:// 订阅器链接 → 真实请求地址：
+// sub://host → https://host/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000
+// sub://host/path?query → https://host/path?query（有路径或参数就原样用）
+function subscriptionUrl(subUrl) {
+  const stripped = String(subUrl).trim().split('#', 1)[0].trim();
+  const rest = stripped.slice('sub://'.length);
+  let real = 'https://' + rest;
+  if (!rest.includes('/') && !rest.includes('?')) {
+    real += '/sub?' + SUB_SNIFF_QUERY;
+  }
+  return real;
+}
+
+// 从一行订阅内容里提取优选地址：节点链接取 server/port/备注，其他协议链接只取 host:port，
+// 其余按普通优选行（IP/域名[:端口][#备注]）处理
+function extractEndpointsFromLines(text) {
+  const endpoints = [];
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^(vmess|vless|trojan|ss):\/\//i.test(line)) {
+      try {
+        for (const n of parseRawLinks(line)) {
+          endpoints.push({ server: n.server, port: n.port, remark: n.name || '' });
+        }
+      } catch {}
+      continue;
+    }
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(line)) {
+      try {
+        const hashIdx = line.indexOf('#');
+        const u = new URL(hashIdx === -1 ? line : line.slice(0, hashIdx));
+        if (u.hostname) {
+          endpoints.push({
+            server: u.hostname,
+            port: u.port ? Number(u.port) : 443,
+            remark: hashIdx === -1 ? '' : decodeURIComponent(line.slice(hashIdx + 1)),
+          });
+        }
+      } catch {}
+      continue;
+    }
+    endpoints.push(...parsePreferredEndpoints(line));
+  }
+  return endpoints.filter((ep) => isValidIPv4(ep.server) || isValidHostname(ep.server));
+}
+
+// 解析订阅正文：整体可能是 base64 订阅（先整体解一次，解出地址就用解开的），
+// 否则按明文逐行解析；两种都解析不到就返回空数组
+function endpointsFromSubscriptionText(text) {
+  const body = String(text || '').trim();
+  const candidates = [];
+  try {
+    const decoded = b64DecodeLoose(body.replace(/\s+/g, ''));
+    if (decoded && decoded !== body) candidates.push(decoded);
+  } catch {}
+  candidates.push(body);
+  for (const cand of candidates) {
+    const eps = extractEndpointsFromLines(cand);
+    if (eps.length) return eps;
+  }
+  return [];
+}
+
 // 从优选 IP 接口拉取地址列表：接口返回每行一个 IP/域名[:端口][#备注] 的文本，
 // 只保留合法 IPv4 或域名（过滤掉注释行等），去重后返回。
+// sub:// 开头的订阅器链接先按订阅器规则转成 https 地址再拉取，正文按订阅解析
+// （整体 base64 或明文节点链接列表，取每个节点的 server:port）。
 async function fetchPreferredEndpointsFromApi(apiUrl) {
-  let parsed;
-  try {
-    parsed = new URL(String(apiUrl).trim());
-  } catch {
-    throw new Error('优选 IP 接口地址不是合法 URL');
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('优选 IP 接口地址只支持 http(s)');
+  const trimmed = String(apiUrl).trim();
+  const isSub = /^sub:\/\//i.test(trimmed);
+  let fetchUrl = trimmed;
+  if (isSub) {
+    fetchUrl = subscriptionUrl(trimmed);
+  } else {
+    let parsed;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new Error('优选 IP 接口地址不是合法 URL');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('优选 IP 接口地址只支持 http(s) 或 sub://');
+    }
   }
 
   let resp;
   try {
-    resp = await fetch(parsed.toString(), { signal: AbortSignal.timeout(10000) });
+    resp = await fetch(fetchUrl, { signal: AbortSignal.timeout(10000) });
   } catch (e) {
     throw new Error(
       `优选 IP 接口拉取失败: ${e.name === 'TimeoutError' ? '超时 10 秒' : e.message}`
@@ -110,9 +186,11 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
     throw new Error(`优选 IP 接口返回 HTTP ${resp.status}`);
   }
 
-  const endpoints = parsePreferredEndpoints(await resp.text()).filter(
-    (ep) => isValidIPv4(ep.server) || isValidHostname(ep.server)
-  );
+  const endpoints = isSub
+    ? endpointsFromSubscriptionText(await resp.text())
+    : parsePreferredEndpoints(await resp.text()).filter(
+        (ep) => isValidIPv4(ep.server) || isValidHostname(ep.server)
+      );
 
   const seen = new Set();
   const deduped = [];
@@ -124,7 +202,7 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
   }
 
   if (!deduped.length) {
-    throw new Error('优选 IP 接口里没有解析到可用地址');
+    throw new Error(isSub ? '订阅里没有解析到可用地址' : '优选 IP 接口里没有解析到可用地址');
   }
   return deduped;
 }
@@ -809,7 +887,7 @@ async function handleGenerate(request, env, url) {
   }
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
 
-  // 优选地址：优选框里直接粘贴的 IP/域名，和混在里面的接口地址（http(s) 开头的行，服务端拉取），去重后使用
+  // 优选地址：优选框里直接粘贴的 IP/域名，和混在里面的接口地址（http(s) 或 sub:// 开头的行，服务端拉取），去重后使用
   const { urls: apiUrls, manualLines } = splitPreferredInput(body.preferredIps || '');
   // 兼容老版：以前单独传的 preferredIpApi 字段也算一个接口地址
   const legacyApi = String(body.preferredIpApi || body.preferredApiUrl || '').trim();
