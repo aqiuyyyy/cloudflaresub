@@ -176,7 +176,15 @@ async function fetchPreferredEndpointsFromApi(apiUrl) {
 
   let resp;
   try {
-    resp = await fetch(fetchUrl, { signal: AbortSignal.timeout(10000) });
+    // 部分源（例如 sub.lzjbaby.com）对不带 User-Agent 的请求返回空正文，
+    // 必须带 UA 才能拿到订阅内容；Worker 的 fetch 默认不带 UA。
+    resp = await fetch(fetchUrl, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
   } catch (e) {
     throw new Error(
       `优选 IP 接口拉取失败: ${e.name === 'TimeoutError' ? '超时 10 秒' : e.message}`
